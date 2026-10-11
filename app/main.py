@@ -100,3 +100,7 @@ def verify_certificate(certificate_id: str, db: Session = Depends(get_db)):
         course_title=cert.job.course_title,
         date=cert.job.date,
     )
+
+@app.get("/", include_in_schema=False)
+def root():
+    return {"message": "Bulk Certificate Generator API", "docs": "/docs"}
