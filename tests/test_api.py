@@ -127,12 +127,13 @@ def test_unknown_job_returns_404(client):
 def test_individual_failure_does_not_stop_other_certificates(client, monkeypatch):
     real = generator.generate_certificate
 
-    def flaky(name, course_title, date, output_path, certificate_id=None):
+    def flaky(name, course_title, date, output_path, certificate_id=None, verify_url=None):
         if name == "Bad Person":
             raise RuntimeError("simulated rendering failure")
         return real(
             name=name, course_title=course_title, date=date,
             output_path=output_path, certificate_id=certificate_id,
+            verify_url=verify_url,
         )
 
     monkeypatch.setattr(service.generator, "generate_certificate", flaky)
@@ -238,3 +239,32 @@ def test_certificate_id_is_printed_on_the_pdf(tmp_path):
     out = tmp_path / "id.pdf"
     generator.generate_certificate("Hema", "Python", "11 Oct 2026", str(out), certificate_id="abc-123")
     assert out.read_bytes().startswith(b"%PDF")
+
+
+# ---------- Extra: QR code on the certificate ----------
+
+def test_certificate_with_qr_code_is_generated(tmp_path):
+    plain = tmp_path / "plain.pdf"
+    with_qr = tmp_path / "qr.pdf"
+    generator.generate_certificate("Hema", "Python", "11 Oct 2026", str(plain))
+    generator.generate_certificate(
+        "Hema", "Python", "11 Oct 2026", str(with_qr),
+        certificate_id="abc-123", verify_url="http://127.0.0.1:8000/verify/abc-123",
+    )
+    assert with_qr.read_bytes().startswith(b"%PDF")
+    assert with_qr.stat().st_size > plain.stat().st_size  # the QR adds content
+
+
+def test_service_passes_verify_url_to_generator(client, monkeypatch):
+    seen = {}
+
+    def spy(name, course_title, date, output_path, certificate_id=None, verify_url=None):
+        seen["certificate_id"] = certificate_id
+        seen["verify_url"] = verify_url
+        return output_path
+
+    monkeypatch.setattr(service.generator, "generate_certificate", spy)
+    monkeypatch.setattr(service, "PUBLIC_BASE_URL", "https://certs.example.com/")
+    client.post("/jobs", json=make_payload("Hemalatha"))
+
+    assert seen["verify_url"] == f"https://certs.example.com/verify/{seen['certificate_id']}"

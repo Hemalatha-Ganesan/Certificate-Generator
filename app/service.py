@@ -5,6 +5,8 @@ from app.database import SessionLocal
 from app.models import Job, Certificate
 
 OUTPUT_DIR = "certificates"
+# Address printed in each certificate's QR code. Set PUBLIC_BASE_URL when deployed.
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
 
 
 def process_job(job_id: str, session_factory=None) -> None:
@@ -35,6 +37,7 @@ def process_job(job_id: str, session_factory=None) -> None:
                     date=job.date,
                     output_path=path,
                     certificate_id=cert.id,
+                    verify_url=f"{PUBLIC_BASE_URL.rstrip('/')}/verify/{cert.id}",
                 )
                 cert.status = "success"
                 cert.file_path = path

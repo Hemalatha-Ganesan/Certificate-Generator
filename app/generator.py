@@ -1,3 +1,6 @@
+from reportlab.graphics import renderPDF
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -12,12 +15,22 @@ def fit_font_size(text: str, font: str, max_size: int, max_width: float, min_siz
     return size
 
 
+def draw_qr(c: canvas.Canvas, data: str, x: float, y: float, size: float) -> None:
+    """Draw a QR code encoding `data` with its lower-left corner at (x, y)."""
+    widget = QrCodeWidget(data)
+    x1, y1, x2, y2 = widget.getBounds()
+    drawing = Drawing(size, size, transform=[size / (x2 - x1), 0, 0, size / (y2 - y1), 0, 0])
+    drawing.add(widget)
+    renderPDF.draw(drawing, c, x, y)
+
+
 def generate_certificate(
     name: str,
     course_title: str,
     date: str,
     output_path: str,
     certificate_id: str | None = None,
+    verify_url: str | None = None,
 ) -> str:
     """Draw one certificate from the fixed template and save it as a PDF."""
     page_width, page_height = landscape(A4)
@@ -56,6 +69,14 @@ def generate_certificate(
         c.setFont("Helvetica", 9)
         c.setFillColor(colors.grey)
         c.drawCentredString(center, 62, f"Certificate ID: {certificate_id}  |  Verify at /verify/{certificate_id}")
+
+    if verify_url:
+        qr_size = 64
+        qr_x = page_width - 40 - 16 - qr_size
+        draw_qr(c, verify_url, qr_x, 62, qr_size)
+        c.setFont("Helvetica", 7)
+        c.setFillColor(colors.grey)
+        c.drawCentredString(qr_x + qr_size / 2, 52, "Scan to verify")
 
     c.showPage()
     c.save()
