@@ -1,8 +1,18 @@
 # Bulk Certificate Generator API
 
-A backend API that accepts a list of recipients, generates a PDF certificate for each one from a single predefined template, tracks the progress of the job, and lets the client download the results.
+A backend API that accepts a list of recipients, generates a PDF certificate for each one from a single predefined template, tracks the progress of the job, and lets the client download and verify the results.
 
 **Stack:** Python 3.10+, FastAPI, SQLAlchemy, SQLite, ReportLab, pytest.
+
+## Features
+
+- Bulk generation: one request, up to 1000 recipients
+- Input validation with clear `422` errors
+- Background processing with live progress tracking
+- Per-certificate failure isolation: one failure never stops the rest
+- Download a single PDF or all PDFs as a zip
+- Long names and course titles shrink automatically to fit the template
+- Every certificate carries a unique ID and a QR code, and a public `/verify` endpoint confirms it is genuine
 
 ## Setup
 
@@ -25,6 +35,14 @@ uvicorn app.main:app --reload
 
 The API runs at `http://127.0.0.1:8000`. Interactive API docs (Swagger UI) are at `http://127.0.0.1:8000/docs`.
 The SQLite database (`certs.db`) is created automatically on first start.
+
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | Address encoded in each certificate's QR code. Set it to your public address when deployed. |
+
+Example (Windows PowerShell): `$env:PUBLIC_BASE_URL="https://certs.example.com"`
 
 ## Run the tests
 
@@ -64,7 +82,7 @@ Validation rules: `course_title` and `date` are required; `recipients` must cont
 curl http://127.0.0.1:8000/jobs/<job_id>
 ```
 
-Returns the job status, `total`, `success_count`, `failed_count`, and a per-recipient list with each certificate's `status` (`pending`, `success` or `failed`) and `error_message` for failures.
+Returns the job status, `total`, `success_count`, `failed_count`, and a per-recipient list with each certificate's `id`, `status` (`pending`, `success` or `failed`) and `error_message` for failures.
 
 Job status values: `pending` -> `processing` -> `completed` (all succeeded) or `completed_with_errors` (at least one failed).
 
@@ -79,6 +97,26 @@ curl -o certificates.zip http://127.0.0.1:8000/jobs/<job_id>/download
 
 Errors: `404` if the job or certificate does not exist (or does not belong to that job); `409` if the certificate failed or nothing is ready yet.
 
+### 4. Verify a certificate
+
+`GET /verify/{certificate_id}` confirms that a certificate was really issued. The ID is printed at the bottom of every PDF, and the QR code in the corner links straight to this endpoint.
+
+```bash
+curl http://127.0.0.1:8000/verify/<certificate_id>
+```
+
+```json
+{
+  "valid": true,
+  "certificate_id": "e163d3f1-552a-49a5-b4d7-2c887acc6db5",
+  "name": "Hemalatha",
+  "course_title": "Python Backend Development",
+  "date": "11 October 2026"
+}
+```
+
+Unknown or failed certificates return `404`. The recipient's email is never exposed.
+
 ## Project structure
 
 ```
@@ -91,6 +129,7 @@ app/
   service.py     Bulk job processing and failure handling
 tests/
   test_api.py    Test suite
+sample_request.json   Example request body
 ```
 
 ## Design decisions
@@ -101,6 +140,8 @@ tests/
 - **Two-level validation.** Bad input (empty list, invalid email, blank name) is rejected up front with `422` by Pydantic. Failures that happen later, during PDF generation, are handled per certificate as above.
 - **Two tables.** `Job` (one per request, with counters for fast progress reads) and `Certificate` (one per recipient, with its own status and error). Counters are committed after every certificate, so progress is visible while the job runs.
 - **Single fixed template.** All layout lives in one function, `generate_certificate`, which takes plain values rather than database objects. This keeps it easy to test and to swap.
+- **Long names fit the template.** The name and course title shrink automatically (down to 8pt) so they never run past the certificate border.
+- **Verifiable certificates.** Each PDF carries its unique ID and a QR code, and `/verify/{id}` confirms it. Only successful certificates verify, personal data such as email is never exposed, and IDs are random UUIDs, so they cannot be guessed. The QR code's base address comes from the `PUBLIC_BASE_URL` environment variable, so a deployed instance prints its real public URL.
 - **Safe file handling.** Files are stored as `certificates/<job_id>/<certificate_id>.pdf` using UUIDs, not recipient names, which avoids duplicate-name collisions and unsafe characters. Zip entry names are sanitised, and a certificate can only be fetched through the job it belongs to.
 - **Batch size cap of 1000** protects the server from oversized requests.
 - **SQLite** is used for easy setup. Switching to PostgreSQL only requires changing `DATABASE_URL` in `app/database.py`.
@@ -108,5 +149,4 @@ tests/
 ## Known limitations
 
 - Background jobs are not persisted across server restarts (see trade-off above).
-- No authentication or rate limiting.
-- Very long recipient names are not auto-shrunk to fit the template.
+- No authentication or rate limiting. The verify endpoint is public by design.
