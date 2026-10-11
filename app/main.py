@@ -86,3 +86,17 @@ def download_all(job_id: str, db: Session = Depends(get_db)):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="job_{job_id}.zip"'},
     )
+
+
+@app.get("/verify/{certificate_id}", response_model=schemas.VerifyOut)
+def verify_certificate(certificate_id: str, db: Session = Depends(get_db)):
+    cert = db.get(models.Certificate, certificate_id)
+    if cert is None or cert.status != "success":
+        raise HTTPException(status_code=404, detail="Certificate not found or not valid")
+    return schemas.VerifyOut(
+        valid=True,
+        certificate_id=cert.id,
+        name=cert.name,
+        course_title=cert.job.course_title,
+        date=cert.job.date,
+    )

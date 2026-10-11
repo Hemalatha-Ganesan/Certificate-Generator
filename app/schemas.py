@@ -53,3 +53,11 @@ class JobOut(BaseModel):
     certificates: List[CertificateOut]
 
     model_config = {"from_attributes": True}
+
+
+class VerifyOut(BaseModel):
+    valid: bool
+    certificate_id: str
+    name: str
+    course_title: str
+    date: str

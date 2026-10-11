@@ -34,6 +34,7 @@ def process_job(job_id: str, session_factory=None) -> None:
                     course_title=job.course_title,
                     date=job.date,
                     output_path=path,
+                    certificate_id=cert.id,
                 )
                 cert.status = "success"
                 cert.file_path = path
@@ -42,7 +43,6 @@ def process_job(job_id: str, session_factory=None) -> None:
                 cert.status = "failed"
                 cert.error_message = str(exc)[:500]
                 job.failed_count += 1
-            # Commit after every certificate so progress is visible live
             db.commit()
 
         job.status = (

@@ -127,10 +127,13 @@ def test_unknown_job_returns_404(client):
 def test_individual_failure_does_not_stop_other_certificates(client, monkeypatch):
     real = generator.generate_certificate
 
-    def flaky(name, course_title, date, output_path):
+    def flaky(name, course_title, date, output_path, certificate_id=None):
         if name == "Bad Person":
             raise RuntimeError("simulated rendering failure")
-        return real(name=name, course_title=course_title, date=date, output_path=output_path)
+        return real(
+            name=name, course_title=course_title, date=date,
+            output_path=output_path, certificate_id=certificate_id,
+        )
 
     monkeypatch.setattr(service.generator, "generate_certificate", flaky)
 
@@ -179,3 +182,59 @@ def test_certificate_cannot_be_read_through_wrong_job(client):
     job_b = client.post("/jobs", json=make_payload("B Two")).json()["job_id"]
     cert_a = client.get(f"/jobs/{job_a}").json()["certificates"][0]["id"]
     assert client.get(f"/jobs/{job_b}/certificates/{cert_a}").status_code == 404
+
+
+# ---------- Extra: long names fit inside the certificate ----------
+
+def test_fit_font_size_shrinks_long_text():
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from app.generator import fit_font_size
+
+    short = fit_font_size("Hema", "Helvetica-Bold", 34, 680)
+    long_name = "A" * 60
+    long_size = fit_font_size(long_name, "Helvetica-Bold", 34, 680)
+
+    assert short == 34                      # short names keep the full size
+    assert long_size < 34                   # long names get smaller
+    assert stringWidth(long_name, "Helvetica-Bold", long_size) <= 680
+
+
+def test_generator_handles_very_long_name(tmp_path):
+    out = tmp_path / "long.pdf"
+    generator.generate_certificate("B" * 100, "C" * 100, "11 Oct 2026", str(out))
+    assert out.read_bytes().startswith(b"%PDF")
+
+
+# ---------- Extra: certificate ID and verification ----------
+
+def test_verify_valid_certificate(client):
+    job_id = client.post("/jobs", json=make_payload("Hemalatha")).json()["job_id"]
+    cert_id = client.get(f"/jobs/{job_id}").json()["certificates"][0]["id"]
+
+    r = client.get(f"/verify/{cert_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["valid"] is True
+    assert body["name"] == "Hemalatha"
+    assert body["course_title"] == "Python Backend Development"
+    assert "email" not in body  # personal data is not exposed
+
+
+def test_verify_unknown_certificate_returns_404(client):
+    assert client.get("/verify/not-a-real-id").status_code == 404
+
+
+def test_verify_failed_certificate_is_not_valid(client, monkeypatch):
+    def always_fails(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(service.generator, "generate_certificate", always_fails)
+    job_id = client.post("/jobs", json=make_payload("Nobody")).json()["job_id"]
+    cert_id = client.get(f"/jobs/{job_id}").json()["certificates"][0]["id"]
+    assert client.get(f"/verify/{cert_id}").status_code == 404
+
+
+def test_certificate_id_is_printed_on_the_pdf(tmp_path):
+    out = tmp_path / "id.pdf"
+    generator.generate_certificate("Hema", "Python", "11 Oct 2026", str(out), certificate_id="abc-123")
+    assert out.read_bytes().startswith(b"%PDF")
